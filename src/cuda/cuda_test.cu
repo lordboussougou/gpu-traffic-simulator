@@ -63,7 +63,7 @@ bool runCudaTest()
 
     std::cout << "CUDA device: " << deviceProperties.name << '\n';
 
-    constexpr int elementCount = 1024;
+    constexpr int elementCount = 1'000'000;
     constexpr int threadsPerBlock = 256;
     constexpr int blockCount =
         (elementCount + threadsPerBlock - 1) / threadsPerBlock;
