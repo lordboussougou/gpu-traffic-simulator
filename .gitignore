@@ -1,0 +1,39 @@
+# Build
+build/
+out/
+cmake-build-*/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.vcxproj
+*.vcxproj.filters
+*.sln
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# CUDA / compiled files
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.ptx
+*.cubin
+*.fatbin
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
