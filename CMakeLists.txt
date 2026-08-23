@@ -33,6 +33,7 @@ FetchContent_MakeAvailable(raylib)
 add_executable(gpu_traffic_simulator
     src/main.cpp
     src/cuda/cuda_test.cu
+    src/simulation/TrafficSimulation.cpp
 )
 
 target_include_directories(gpu_traffic_simulator
