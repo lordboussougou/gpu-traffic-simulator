@@ -34,6 +34,7 @@ add_executable(gpu_traffic_simulator
     src/main.cpp
     src/cuda/cuda_test.cu
     src/simulation/TrafficSimulation.cpp
+    src/rendering/CameraController.cpp
 )
 
 target_include_directories(gpu_traffic_simulator

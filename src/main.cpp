@@ -4,6 +4,7 @@
 #include <raylib.h>
 
 #include "simulation/TrafficSimulation.hpp"
+#include "rendering/CameraController.hpp"
 
 int main()
 {
@@ -22,28 +23,22 @@ int main()
     InitWindow(screenWidth, screenHeight, "GPU Traffic Simulator - Step 1");
     SetTargetFPS(60);
 
-    Camera3D camera{};
-    camera.position = {100.0f, 50.0f, 60.0f};
-    camera.target = {100.0f, 0.0f, 0.0f};
-    camera.up = {0.0f, 1.0f, 0.0f};
-    camera.fovy = 45.0f;
-    camera.projection = CAMERA_PERSPECTIVE;
+    CameraController cameraController;
 
     TrafficSimulation simulation;
 
     while (!WindowShouldClose())
     {
-        UpdateCamera(&camera, CAMERA_FREE);
-        
         const float deltaTime = GetFrameTime();
+
+        cameraController.update(deltaTime);
         simulation.update(deltaTime);
         
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        BeginMode3D(camera);
+        BeginMode3D(cameraController.getCamera());
 
-        DrawGrid(20, 1.0f);
         DrawPlane(
             {100.0f, 0.0f, 0.0f},
             {200.0f, 8.0f},
@@ -90,7 +85,7 @@ int main()
 
         DrawText("GPU Traffic Simulator", 20, 20, 28, DARKGRAY);
         DrawText("Step 2: CPU traffic simulation", 20, 58, 20, GRAY);
-        DrawText("Mouse wheel: zoom | Middle mouse: move camera.", 20, 88, 18, DARKGRAY);
+        DrawText("WASD Move | Q/E Rotate | T/G Tilt | R/F Height | Wheel Zoom | Shift Fast", 20, 88, 18, DARKGRAY);        
         DrawText("CUDA test passed. ESC to quit.", 20, 118, 18, DARKGREEN);
 
         EndDrawing();
