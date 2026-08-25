@@ -55,13 +55,17 @@ int main(int argc, char* argv[])
 
     constexpr int screenWidth = 1280;
     constexpr int screenHeight = 720;
-    constexpr std::size_t maxRenderedVehicles = 500;
 
     InitWindow(screenWidth, screenHeight, "GPU Traffic Simulator - CUDA Benchmark");
     SetTargetFPS(60);
 
     CameraController cameraController;
     TrafficSimulation simulation(vehicleCount, metersPerVehicle);
+
+    const float roadLength = simulation.getRoadLength();
+
+    cameraController.setHorizontalBounds(0.0f, roadLength);
+    cameraController.setTarget({std::min(100.0f, roadLength * 0.5f), 0.0f, 0.0f});
 
     std::size_t selectedVehicleIndex = 0;
 
@@ -73,41 +77,57 @@ int main(int argc, char* argv[])
         simulation.update(deltaTime);
 
         const auto& vehicles = simulation.getVehicles();
-        const std::size_t renderedVehicleCount = std::min(vehicles.size(), maxRenderedVehicles);
 
-        if (renderedVehicleCount > 0)
+        if (!vehicles.empty())
         {
             if (IsKeyPressed(KEY_RIGHT))
-                selectedVehicleIndex = (selectedVehicleIndex + 1) % renderedVehicleCount;
+                selectedVehicleIndex = (selectedVehicleIndex + 1) % vehicles.size();
 
             if (IsKeyPressed(KEY_LEFT))
-                selectedVehicleIndex =
-                    (selectedVehicleIndex + renderedVehicleCount - 1) % renderedVehicleCount;
+                selectedVehicleIndex = (selectedVehicleIndex + vehicles.size() - 1) % vehicles.size();
         }
 
-        const float roadLength = simulation.getRoadLength();
+        const float cameraX = cameraController.getTarget().x;
+        const float renderDistance = cameraController.getRenderDistance();
+
+        const float renderStart = std::max(0.0f, cameraX - renderDistance);
+        const float renderEnd = std::min(roadLength, cameraX + renderDistance);
+
+        std::size_t renderedVehicleCount = 0;
+
 
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
         BeginMode3D(cameraController.getCamera());
 
-        DrawPlane({roadLength * 0.5f, 0.0f, 0.0f}, {roadLength, 8.0f}, DARKGRAY);
-        DrawLine3D({0.0f, 0.02f, -4.0f}, {roadLength, 0.02f, -4.0f}, WHITE);
-        DrawLine3D({0.0f, 0.02f, 4.0f}, {roadLength, 0.02f, 4.0f}, WHITE);
+        const float roadSegmentLength = std::max(renderEnd - renderStart, 1.0f);
+        const float roadSegmentCenter = (renderStart + renderEnd) * 0.5f;
 
-        for (std::size_t i = 0; i < renderedVehicleCount; ++i)
+        DrawPlane({roadSegmentLength, 0.0f, 0.0f}, {roadSegmentLength, 8.0f}, DARKGRAY);
+        DrawLine3D({renderStart, 0.02f, -4.0f}, {renderEnd, 0.02f, -4.0f}, WHITE);
+        DrawLine3D({renderStart, 0.02f, 4.0f}, {renderEnd, 0.02f, 4.0f}, WHITE);
+
+        for (std::size_t i = 0; i < vehicles.size(); ++i)
         {
             const Vehicle& vehicle = vehicles[i];
 
+            if (vehicle.position < renderStart || vehicle.position > renderEnd)
+                continue;
+
             Color vehicleColor = vehicle.desiredSpeed < 10.0f ? RED : BLUE;
 
-            if (i == selectedVehicleIndex) vehicleColor = YELLOW;
+            if (i == selectedVehicleIndex)
+                vehicleColor = YELLOW;
 
             const Vector3 vehiclePosition{vehicle.position, 0.5f, 0.0f};
 
             DrawCube(vehiclePosition, 4.0f, 1.0f, 2.0f, vehicleColor);
-            DrawCubeWires(vehiclePosition, 4.0f, 1.0f, 2.0f, DARKBLUE);
+
+            if (i == selectedVehicleIndex)
+                DrawCubeWires(vehiclePosition, 4.0f, 1.0f, 2.0f, BLACK);
+
+            ++renderedVehicleCount;
         }
 
         EndMode3D();
@@ -118,13 +138,16 @@ int main(int argc, char* argv[])
         DrawText("CUDA leader search + IDM + vehicle update", 20, 58, 20, GRAY);
 
         DrawText(TextFormat("Vehicles: %zu", vehicles.size()), 20, 95, 18, DARKGRAY);
-        DrawText(TextFormat("Rendered: %zu / %zu", renderedVehicleCount, vehicles.size()), 20, 120, 18, DARKGRAY);
-        DrawText(TextFormat("Road length: %.0f m", roadLength), 20, 145, 18, DARKGRAY);
+        DrawText(TextFormat("Visible vehicles: %zu / %zu", renderedVehicleCount, vehicles.size()), 20, 120, 18, DARKGRAY);        DrawText(TextFormat("Road length: %.0f m", roadLength), 20, 145, 18, DARKGRAY);
         DrawText(TextFormat("Spacing: %.1f m", metersPerVehicle), 20, 170, 18, DARKGRAY);
 
         DrawText(TextFormat("Kernel: %.4f ms", simulation.getLastKernelTimeMs()), 20, 205, 18, DARKGREEN);
         DrawText(TextFormat("CUDA update total: %.4f ms", simulation.getLastCudaUpdateTimeMs()), 20, 230, 18, DARKGREEN);
         
+        DrawText(TextFormat("Camera X: %.0f m", cameraController.getTarget().x), 20, 285, 18, GRAY);
+        DrawText(TextFormat("Camera distance: %.0f m", cameraController.getDistance()), 20, 310, 18, GRAY);
+        DrawText("WASD Move | Shift Fast | Q/E Rotate | T/G Tilt | R/F Height | Wheel Zoom", 20, 680, 16, GRAY);
+
         DrawFPS(20, 260);
 
         DrawRectangle(screenWidth - 300, 20, 280, 190, Fade(BLACK, 0.75f));

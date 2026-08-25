@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <cmath>
 
-#include <raymath.h>
-
 CameraController::CameraController()
 {
     camera_.target = target_;
@@ -17,141 +15,117 @@ CameraController::CameraController()
 
 void CameraController::update(float deltaTime)
 {
-    float currentMoveSpeed = moveSpeed_;
+    const float adaptiveMoveSpeed = std::clamp(distance_ * 1.5f, 20.0f, 8000.0f);
+    const float speedMultiplier = IsKeyDown(KEY_LEFT_SHIFT) ? 6.0f : 1.0f;
+    const float moveSpeed = adaptiveMoveSpeed * speedMultiplier * deltaTime;
 
-    if (IsKeyDown(KEY_LEFT_SHIFT))
-    {
-        currentMoveSpeed *= 3.0f;
-    }
+    const Vector3 forward{-std::cos(yaw_), 0.0f, -std::sin(yaw_)};
+    const Vector3 right{-forward.z, 0.0f, forward.x};
 
-    // Direction vers laquelle la caméra regarde,
-    // projetée sur le sol XZ.
-    Vector3 forward{
-        -std::cos(yaw_),
-        0.0f,
-        -std::sin(yaw_)
-    };
-
-    forward = Vector3Normalize(forward);
-
-    const Vector3 right =
-        Vector3Normalize(
-            Vector3CrossProduct(
-                forward,
-                {0.0f, 1.0f, 0.0f}
-            )
-        );
-
-    // Translation sur le plan horizontal
     if (IsKeyDown(KEY_W))
     {
-        target_ = Vector3Add(
-            target_,
-            Vector3Scale(forward, currentMoveSpeed * deltaTime)
-        );
+        target_.x += forward.x * moveSpeed;
+        target_.z += forward.z * moveSpeed;
     }
 
     if (IsKeyDown(KEY_S))
     {
-        target_ = Vector3Subtract(
-            target_,
-            Vector3Scale(forward, currentMoveSpeed * deltaTime)
-        );
+        target_.x -= forward.x * moveSpeed;
+        target_.z -= forward.z * moveSpeed;
     }
 
     if (IsKeyDown(KEY_D))
     {
-        target_ = Vector3Add(
-            target_,
-            Vector3Scale(right, currentMoveSpeed * deltaTime)
-        );
+        target_.x += right.x * moveSpeed;
+        target_.z += right.z * moveSpeed;
     }
 
     if (IsKeyDown(KEY_A))
     {
-        target_ = Vector3Subtract(
-            target_,
-            Vector3Scale(right, currentMoveSpeed * deltaTime)
-        );
+        target_.x -= right.x * moveSpeed;
+        target_.z -= right.z * moveSpeed;
     }
 
-    // Rotation horizontale
-    if (IsKeyDown(KEY_Q))
-    {
-        yaw_ -= rotationSpeed_ * deltaTime;
-    }
+    const float rotationSpeed = 1.25f * deltaTime;
 
-    if (IsKeyDown(KEY_E))
-    {
-        yaw_ += rotationSpeed_ * deltaTime;
-    }
+    if (IsKeyDown(KEY_Q)) yaw_ += rotationSpeed;
+    if (IsKeyDown(KEY_E)) yaw_ -= rotationSpeed;
 
-    // Inclinaison
-    if (IsKeyDown(KEY_T))
-    {
-        pitch_ += pitchSpeed_ * deltaTime;
-    }
+    if (IsKeyDown(KEY_T)) pitch_ += rotationSpeed;
+    if (IsKeyDown(KEY_G)) pitch_ -= rotationSpeed;
 
-    if (IsKeyDown(KEY_G))
-    {
-        pitch_ -= pitchSpeed_ * deltaTime;
-    }
+    pitch_ = std::clamp(pitch_, 0.15f, 1.35f);
 
-    pitch_ = std::clamp(
-        pitch_,
-        minPitch_,
-        maxPitch_
-    );
+    const float verticalSpeed = adaptiveMoveSpeed * 0.5f * deltaTime;
 
-    // Déplacement vertical
-    if (IsKeyDown(KEY_R))
-    {
-        target_.y += verticalSpeed_ * deltaTime;
-    }
+    if (IsKeyDown(KEY_R)) target_.y += verticalSpeed;
+    if (IsKeyDown(KEY_F)) target_.y -= verticalSpeed;
 
-    if (IsKeyDown(KEY_F))
-    {
-        target_.y -= verticalSpeed_ * deltaTime;
-    }
+    target_.y = std::max(target_.y, 0.0f);
 
-    // Zoom souris
     const float wheel = GetMouseWheelMove();
 
     if (wheel != 0.0f)
     {
-        distance_ -= wheel * zoomSpeed_;
-
-        distance_ = std::clamp(
-            distance_,
-            minDistance_,
-            maxDistance_
-        );
+        distance_ *= std::pow(0.78f, wheel);
+        distance_ = std::clamp(distance_, minDistance_, maxDistance_);
     }
 
+    clampTarget();
     updateCameraPosition();
 }
 
 void CameraController::updateCameraPosition()
 {
-    const float horizontalDistance =
-        distance_ * std::cos(pitch_);
+    const float horizontalDistance = std::cos(pitch_) * distance_;
 
-    camera_.position.x =
-        target_.x +
-        horizontalDistance * std::cos(yaw_);
-
-    camera_.position.y =
-        target_.y +
-        distance_ * std::sin(pitch_);
-
-    camera_.position.z =
-        target_.z +
-        horizontalDistance * std::sin(yaw_);
+    camera_.position.x = target_.x + std::cos(yaw_) * horizontalDistance;
+    camera_.position.y = target_.y + std::sin(pitch_) * distance_;
+    camera_.position.z = target_.z + std::sin(yaw_) * horizontalDistance;
 
     camera_.target = target_;
+}
+
+void CameraController::clampTarget()
+{
+    if (!horizontalBoundsEnabled_) return;
+
+    target_.x = std::clamp(target_.x, minX_, maxX_);
 }
 
 const Camera3D& CameraController::getCamera() const
 {
     return camera_;
+}
+
+const Vector3& CameraController::getTarget() const
+{
+    return target_;
+}
+
+float CameraController::getDistance() const
+{
+    return distance_;
+}
+
+float CameraController::getRenderDistance() const
+{
+    return std::clamp(distance_ * 2.5f, 150.0f, 20000.0f);
+}
+
+void CameraController::setTarget(const Vector3& target)
+{
+    target_ = target;
+    clampTarget();
+    updateCameraPosition();
+}
+
+void CameraController::setHorizontalBounds(float minX, float maxX)
+{
+    minX_ = std::min(minX, maxX);
+    maxX_ = std::max(minX, maxX);
+    horizontalBoundsEnabled_ = true;
+
+    clampTarget();
+    updateCameraPosition();
 }

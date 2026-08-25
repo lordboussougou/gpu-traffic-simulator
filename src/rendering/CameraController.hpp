@@ -10,27 +10,29 @@ public:
     void update(float deltaTime);
 
     const Camera3D& getCamera() const;
+    const Vector3& getTarget() const;
+
+    float getDistance() const;
+    float getRenderDistance() const;
+
+    void setTarget(const Vector3& target);
+    void setHorizontalBounds(float minX, float maxX);
 
 private:
     void updateCameraPosition();
+    void clampTarget();
 
     Camera3D camera_{};
+    Vector3 target_{};
 
-    Vector3 target_{100.0f, 0.0f, 0.0f};
+    float yaw_ = -2.35f;
+    float pitch_ = 0.65f;
+    float distance_ = 60.0f;
 
-    float yaw_ = 1.5708f;
-    float pitch_ = 0.70f;
-    float distance_ = 78.0f;
+    float minX_ = 0.0f;
+    float maxX_ = 0.0f;
+    bool horizontalBoundsEnabled_ = false;
 
-    float moveSpeed_ = 30.0f;
-    float verticalSpeed_ = 20.0f;
-    float rotationSpeed_ = 1.2f;
-    float pitchSpeed_ = 0.8f;
-    float zoomSpeed_ = 8.0f;
-
-    float minDistance_ = 5.0f;
-    float maxDistance_ = 250.0f;
-
-    float minPitch_ = 0.15f;
-    float maxPitch_ = 1.40f;
+    static constexpr float minDistance_ = 10.0f;
+    static constexpr float maxDistance_ = 50000.0f;
 };
