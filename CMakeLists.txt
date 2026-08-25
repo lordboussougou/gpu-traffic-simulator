@@ -13,10 +13,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# CUDA runtime
 find_package(CUDAToolkit REQUIRED)
 
-# raylib
 include(FetchContent)
 
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -32,33 +30,20 @@ FetchContent_MakeAvailable(raylib)
 
 add_executable(gpu_traffic_simulator
     src/main.cpp
-    src/cuda/cuda_test.cu
+    src/cuda/CudaVehicleUpdater.cu
+    src/rendering/CameraController.cpp
     src/simulation/TrafficSimulation.cpp
     src/simulation/models/IDM.cpp
-    src/rendering/CameraController.cpp
 )
 
-target_include_directories(gpu_traffic_simulator
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
+target_include_directories(gpu_traffic_simulator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-target_link_libraries(gpu_traffic_simulator
-    PRIVATE
-        raylib
-        CUDA::cudart
-)
+target_link_libraries(gpu_traffic_simulator PRIVATE raylib CUDA::cudart)
 
-set_target_properties(gpu_traffic_simulator PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-)
+set_target_properties(gpu_traffic_simulator PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 
 if(MSVC)
-    target_compile_options(gpu_traffic_simulator PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:/W4>
-    )
+    target_compile_options(gpu_traffic_simulator PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4>)
 else()
-    target_compile_options(gpu_traffic_simulator PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>
-    )
+    target_compile_options(gpu_traffic_simulator PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -Wpedantic>)
 endif()

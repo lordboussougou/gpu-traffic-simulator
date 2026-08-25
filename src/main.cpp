@@ -1,5 +1,3 @@
-#include "cuda/cuda_test.cuh"
-
 #include <cstddef>
 #include <iostream>
 #include <raylib.h>
@@ -12,16 +10,10 @@ int main()
     std::cout << "GPU Traffic Simulator\n";
     std::cout << "=====================\n\n";
 
-    if (!runCudaTest())
-    {
-        std::cerr << "\nCUDA test failed. The 3D window will not start.\n";
-        return 1;
-    }
-
     constexpr int screenWidth = 1280;
     constexpr int screenHeight = 720;
 
-    InitWindow(screenWidth, screenHeight, "GPU Traffic Simulator - Step 2");
+    InitWindow(screenWidth, screenHeight, "GPU Traffic Simulator - Step 3");
     SetTargetFPS(60);
 
     CameraController cameraController;
@@ -70,10 +62,10 @@ int main()
         const VehicleTelemetry telemetry = simulation.getVehicleTelemetry(selectedVehicleIndex);
 
         DrawText("GPU Traffic Simulator", 20, 20, 28, DARKGRAY);
-        DrawText("Step 2: CPU traffic simulation + IDM", 20, 58, 20, GRAY);
+        DrawText("Step 3: CUDA vehicle update + IDM", 20, 58, 20, GRAY);
         DrawText("WASD Move | Q/E Rotate | T/G Tilt | R/F Height | Wheel Zoom | Shift Fast", 20, 88, 18, DARKGRAY);
         DrawText("Left/Right Arrows: select vehicle", 20, 118, 18, DARKGRAY);
-        DrawText("CUDA test passed. ESC to quit.", 20, 148, 18, DARKGREEN);
+        DrawText("Vehicle update: GPU (CUDA) | Leader search: CPU", 20, 148, 18, DARKGREEN);
 
         DrawRectangle(screenWidth - 300, 20, 280, 190, Fade(BLACK, 0.75f));
         DrawText(TextFormat("Vehicle #%d", telemetry.vehicleId), screenWidth - 280, 35, 22, WHITE);

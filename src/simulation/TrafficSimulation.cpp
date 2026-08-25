@@ -2,11 +2,14 @@
 
 #include <algorithm>
 #include <limits>
+#include <stdexcept>
 
 TrafficSimulation::TrafficSimulation()
 {
     constexpr int vehicleCount = 12;
+
     vehicles_.reserve(vehicleCount);
+    leaderIndices_.resize(vehicleCount);
 
     for (int i = 0; i < vehicleCount; ++i)
     {
@@ -25,38 +28,25 @@ void TrafficSimulation::update(float deltaTime)
 {
     if (vehicles_.empty()) return;
 
-    std::vector<float> accelerations(vehicles_.size(), 0.0f);
+    if (leaderIndices_.size() != vehicles_.size()) leaderIndices_.resize(vehicles_.size());
 
-    // Phase 1 : calcul IDM à partir de l'état courant.
-    for (std::size_t i = 0; i < vehicles_.size(); ++i)
+    // Phase CPU : pour l'instant, la recherche du leader reste séquentielle.
+    if (vehicles_.size() == 1)
     {
-        const Vehicle& vehicle = vehicles_[i];
-
-        if (vehicles_.size() == 1)
-        {
-            accelerations[i] = idm_.computeAcceleration(vehicle.speed, vehicle.desiredSpeed, vehicle.speed, roadLength_);
-            continue;
-        }
-
-        const std::size_t leaderIndex = findLeaderIndex(i);
-        const Vehicle& leader = vehicles_[leaderIndex];
-        const float centerDistance = distanceAhead(vehicle, leader);
-        const float gap = std::max(centerDistance - vehicleLength_, 0.1f);
-
-        accelerations[i] = idm_.computeAcceleration(vehicle.speed, vehicle.desiredSpeed, leader.speed, gap);
+        leaderIndices_[0] = 0;
+    }
+    else
+    {
+        for (std::size_t i = 0; i < vehicles_.size(); ++i)
+            leaderIndices_[i] = static_cast<int>(findLeaderIndex(i));
     }
 
-    // Phase 2 : application des accélérations et mise à jour de l'état.
-    for (std::size_t i = 0; i < vehicles_.size(); ++i)
-    {
-        Vehicle& vehicle = vehicles_[i];
-        vehicle.acceleration = accelerations[i];
-        vehicle.speed += vehicle.acceleration * deltaTime;
-        vehicle.speed = std::max(vehicle.speed, 0.0f);
-        vehicle.position += vehicle.speed * deltaTime;
+    // Phase GPU : IDM + accélération + vitesse + position, un thread CUDA par véhicule.
+    const bool success = cudaVehicleUpdater_.update(
+        vehicles_, leaderIndices_, deltaTime, roadLength_, vehicleLength_, idm_.getParameters()
+    );
 
-        if (vehicle.position >= roadLength_) vehicle.position -= roadLength_;
-    }
+    if (!success) throw std::runtime_error("CUDA vehicle update failed.");
 }
 
 std::size_t TrafficSimulation::findLeaderIndex(std::size_t vehicleIndex) const
@@ -112,6 +102,7 @@ VehicleTelemetry TrafficSimulation::getVehicleTelemetry(std::size_t vehicleIndex
 
     const std::size_t leaderIndex = findLeaderIndex(vehicleIndex);
     const Vehicle& leader = vehicles_[leaderIndex];
+
     telemetry.leaderId = leader.id;
     telemetry.gap = std::max(distanceAhead(vehicle, leader) - vehicleLength_, 0.1f);
 
