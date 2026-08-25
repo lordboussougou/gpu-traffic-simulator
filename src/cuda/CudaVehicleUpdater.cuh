@@ -4,19 +4,22 @@
 #include "simulation/models/IDM.hpp"
 
 #include <cstddef>
+#include <cuda_runtime_api.h>
 #include <vector>
 
 class CudaVehicleUpdater
 {
 public:
-    CudaVehicleUpdater() = default;
+    CudaVehicleUpdater();
     ~CudaVehicleUpdater();
 
     CudaVehicleUpdater(const CudaVehicleUpdater&) = delete;
     CudaVehicleUpdater& operator=(const CudaVehicleUpdater&) = delete;
 
-    bool update(std::vector<Vehicle>& vehicles, const std::vector<int>& leaderIndices, float deltaTime,
-                float roadLength, float vehicleLength, const IDMParameters& idmParameters);
+    bool update(std::vector<Vehicle>& vehicles, float deltaTime, float roadLength, float vehicleLength,
+                const IDMParameters& idmParameters);
+
+    float getLastKernelTimeMs() const;
 
 private:
     bool ensureCapacity(std::size_t count);
@@ -24,6 +27,10 @@ private:
 
     Vehicle* deviceVehiclesInput_ = nullptr;
     Vehicle* deviceVehiclesOutput_ = nullptr;
-    int* deviceLeaderIndices_ = nullptr;
+
+    cudaEvent_t kernelStartEvent_ = nullptr;
+    cudaEvent_t kernelStopEvent_ = nullptr;
+
     std::size_t capacity_ = 0;
+    float lastKernelTimeMs_ = 0.0f;
 };

@@ -1,25 +1,30 @@
 #include "TrafficSimulation.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 
-TrafficSimulation::TrafficSimulation()
+TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVehicle)
 {
-    constexpr int vehicleCount = 12;
+    const float spacing = std::max(metersPerVehicle, vehicleLength_ + 0.1f);
+
+    roadLength_ = static_cast<float>(std::max<std::size_t>(vehicleCount, 1)) * spacing;
 
     vehicles_.reserve(vehicleCount);
-    leaderIndices_.resize(vehicleCount);
 
-    for (int i = 0; i < vehicleCount; ++i)
+    for (std::size_t i = 0; i < vehicleCount; ++i)
     {
         Vehicle vehicle;
-        vehicle.id = i;
-        vehicle.position = (roadLength_ / static_cast<float>(vehicleCount)) * static_cast<float>(i);
+
+        vehicle.id = static_cast<int>(i);
+        vehicle.position = static_cast<float>(i) * spacing;
         vehicle.speed = 0.0f;
         vehicle.acceleration = 0.0f;
         vehicle.lane = 0;
-        vehicle.desiredSpeed = (i == 6) ? 7.0f : 15.0f;
+
+        vehicle.desiredSpeed = (i == vehicleCount / 2) ? 7.0f : 15.0f;
+
         vehicles_.push_back(vehicle);
     }
 }
@@ -28,30 +33,23 @@ void TrafficSimulation::update(float deltaTime)
 {
     if (vehicles_.empty()) return;
 
-    if (leaderIndices_.size() != vehicles_.size()) leaderIndices_.resize(vehicles_.size());
+    const auto start = std::chrono::high_resolution_clock::now();
 
-    // Phase CPU : pour l'instant, la recherche du leader reste séquentielle.
-    if (vehicles_.size() == 1)
-    {
-        leaderIndices_[0] = 0;
-    }
-    else
-    {
-        for (std::size_t i = 0; i < vehicles_.size(); ++i)
-            leaderIndices_[i] = static_cast<int>(findLeaderIndex(i));
-    }
+    const bool success =
+        cudaVehicleUpdater_.update(vehicles_, deltaTime, roadLength_, vehicleLength_, idm_.getParameters());
 
-    // Phase GPU : IDM + accélération + vitesse + position, un thread CUDA par véhicule.
-    const bool success = cudaVehicleUpdater_.update(
-        vehicles_, leaderIndices_, deltaTime, roadLength_, vehicleLength_, idm_.getParameters()
-    );
+    const auto end = std::chrono::high_resolution_clock::now();
+
+    lastCudaUpdateTimeMs_ =
+        std::chrono::duration<float, std::milli>(end - start).count();
 
     if (!success) throw std::runtime_error("CUDA vehicle update failed.");
 }
 
-std::size_t TrafficSimulation::findLeaderIndex(std::size_t vehicleIndex) const
+std::size_t TrafficSimulation::findLeaderIndexForTelemetry(std::size_t vehicleIndex) const
 {
     const Vehicle& vehicle = vehicles_[vehicleIndex];
+
     std::size_t closestIndex = vehicleIndex;
     float closestDistance = std::numeric_limits<float>::max();
 
@@ -60,6 +58,7 @@ std::size_t TrafficSimulation::findLeaderIndex(std::size_t vehicleIndex) const
         if (i == vehicleIndex) continue;
 
         const float distance = distanceAhead(vehicle, vehicles_[i]);
+
         if (distance < closestDistance)
         {
             closestDistance = distance;
@@ -73,7 +72,9 @@ std::size_t TrafficSimulation::findLeaderIndex(std::size_t vehicleIndex) const
 float TrafficSimulation::distanceAhead(const Vehicle& vehicle, const Vehicle& leader) const
 {
     float distance = leader.position - vehicle.position;
+
     if (distance <= 0.0f) distance += roadLength_;
+
     return distance;
 }
 
@@ -85,9 +86,11 @@ const std::vector<Vehicle>& TrafficSimulation::getVehicles() const
 VehicleTelemetry TrafficSimulation::getVehicleTelemetry(std::size_t vehicleIndex) const
 {
     VehicleTelemetry telemetry{};
+
     if (vehicleIndex >= vehicles_.size()) return telemetry;
 
     const Vehicle& vehicle = vehicles_[vehicleIndex];
+
     telemetry.vehicleId = vehicle.id;
     telemetry.speed = vehicle.speed;
     telemetry.desiredSpeed = vehicle.desiredSpeed;
@@ -97,14 +100,30 @@ VehicleTelemetry TrafficSimulation::getVehicleTelemetry(std::size_t vehicleIndex
     {
         telemetry.leaderId = -1;
         telemetry.gap = roadLength_;
+
         return telemetry;
     }
 
-    const std::size_t leaderIndex = findLeaderIndex(vehicleIndex);
+    const std::size_t leaderIndex = findLeaderIndexForTelemetry(vehicleIndex);
     const Vehicle& leader = vehicles_[leaderIndex];
 
     telemetry.leaderId = leader.id;
     telemetry.gap = std::max(distanceAhead(vehicle, leader) - vehicleLength_, 0.1f);
 
     return telemetry;
+}
+
+float TrafficSimulation::getRoadLength() const
+{
+    return roadLength_;
+}
+
+float TrafficSimulation::getLastKernelTimeMs() const
+{
+    return cudaVehicleUpdater_.getLastKernelTimeMs();
+}
+
+float TrafficSimulation::getLastCudaUpdateTimeMs() const
+{
+    return lastCudaUpdateTimeMs_;
 }
