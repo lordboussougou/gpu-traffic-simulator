@@ -3,6 +3,7 @@
 #include "Vehicle.hpp"
 #include "cuda/CudaVehicleUpdater.cuh"
 #include "models/IDM.hpp"
+#include "road/RoadNetwork.hpp"
 
 #include <cstddef>
 #include <vector>
@@ -26,6 +27,7 @@ public:
     void update(float deltaTime);
 
     const std::vector<Vehicle>& getVehicles() const;
+    const RoadNetwork& getRoadNetwork() const;
 
     VehicleTelemetry getVehicleTelemetry(std::size_t vehicleIndex) const;
 
@@ -41,6 +43,8 @@ private:
 
     IDM idm_;
     CudaVehicleUpdater cudaVehicleUpdater_;
+
+    RoadNetwork roadNetwork_;
 
     float roadLength_ = 200.0f;
     float lastCudaUpdateTimeMs_ = 0.0f;

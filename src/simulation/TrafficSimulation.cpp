@@ -5,11 +5,25 @@
 #include <limits>
 #include <stdexcept>
 
+namespace
+{
+float calculateRoadLength(std::size_t vehicleCount, float metersPerVehicle)
+{
+    constexpr float vehicleLength = 4.0f;
+
+    const float spacing = std::max(metersPerVehicle, vehicleLength + 0.1f);
+    const std::size_t safeVehicleCount = std::max<std::size_t>(vehicleCount, 1);
+
+    return static_cast<float>(safeVehicleCount) * spacing;
+}
+}
+
 TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVehicle)
+    : roadNetwork_(calculateRoadLength(vehicleCount, metersPerVehicle))
 {
     const float spacing = std::max(metersPerVehicle, vehicleLength_ + 0.1f);
 
-    roadLength_ = static_cast<float>(std::max<std::size_t>(vehicleCount, 1)) * spacing;
+    roadLength_ = roadNetwork_.getRouteLength();
 
     vehicles_.reserve(vehicleCount);
 
@@ -22,7 +36,6 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
         vehicle.speed = 0.0f;
         vehicle.acceleration = 0.0f;
         vehicle.lane = 0;
-
         vehicle.desiredSpeed = (i == vehicleCount / 2) ? 7.0f : 15.0f;
 
         vehicles_.push_back(vehicle);
@@ -67,6 +80,11 @@ std::size_t TrafficSimulation::findLeaderIndexForTelemetry(std::size_t vehicleIn
     }
 
     return closestIndex;
+}
+
+const RoadNetwork& TrafficSimulation::getRoadNetwork() const
+{
+    return roadNetwork_;
 }
 
 float TrafficSimulation::distanceAhead(const Vehicle& vehicle, const Vehicle& leader) const

@@ -34,6 +34,7 @@ add_executable(gpu_traffic_simulator
     src/rendering/CameraController.cpp
     src/simulation/TrafficSimulation.cpp
     src/simulation/models/IDM.cpp
+    src/simulation/road/RoadNetwork.cpp
 )
 
 target_include_directories(gpu_traffic_simulator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
