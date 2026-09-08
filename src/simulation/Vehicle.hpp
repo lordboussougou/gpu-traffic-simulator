@@ -4,6 +4,7 @@ struct Vehicle
 {
     int id = 0;
     int currentEdgeId = 0;
+    int nextEdgeId = -1;
 
     float position = 0.0f;          // Distance parcourue le long de la route, en mètres.
     float speed = 0.0f;             // m/s   

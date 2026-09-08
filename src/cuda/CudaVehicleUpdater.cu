@@ -16,20 +16,13 @@ bool checkCuda(cudaError_t error, const char* operation)
     return false;
 }
 
-__device__ float distanceAhead(float vehiclePosition, float leaderPosition, float roadLength)
-{
-    float distance = leaderPosition - vehiclePosition;
-    if (distance <= 0.0f) distance += roadLength;
-
-    return distance;
-}
-
-__device__ int findLeaderIndex(const Vehicle* vehicles, int vehicleCount, int vehicleIndex)
+__device__ int findLeaderIndex(const Vehicle* vehicles, const float* edgeLengths, int vehicleCount, int edgeCount,
+                               int vehicleIndex, float& leaderDistance)
 {
     const Vehicle& vehicle = vehicles[vehicleIndex];
 
     int closestIndex = -1;
-    float closestDistance = 1.0e30f;
+    leaderDistance = 1.0e30f;
 
     for (int i = 0; i < vehicleCount; ++i)
     {
@@ -41,9 +34,33 @@ __device__ int findLeaderIndex(const Vehicle* vehicles, int vehicleCount, int ve
 
         const float distance = candidate.position - vehicle.position;
 
-        if (distance > 0.0f && distance < closestDistance)
+        if (distance > 0.0f && distance < leaderDistance)
         {
-            closestDistance = distance;
+            leaderDistance = distance;
+            closestIndex = i;
+        }
+    }
+
+    if (closestIndex >= 0) return closestIndex;
+
+    if (vehicle.nextEdgeId < 0 || vehicle.nextEdgeId >= edgeCount) return -1;
+    if (vehicle.currentEdgeId < 0 || vehicle.currentEdgeId >= edgeCount) return -1;
+
+    const float distanceToIntersection = edgeLengths[vehicle.currentEdgeId] - vehicle.position;
+
+    for (int i = 0; i < vehicleCount; ++i)
+    {
+        if (i == vehicleIndex) continue;
+
+        const Vehicle& candidate = vehicles[i];
+
+        if (candidate.currentEdgeId != vehicle.nextEdgeId) continue;
+
+        const float distance = distanceToIntersection + candidate.position;
+
+        if (distance > 0.0f && distance < leaderDistance)
+        {
+            leaderDistance = distance;
             closestIndex = i;
         }
     }
@@ -73,7 +90,8 @@ __device__ float computeIdmAcceleration(float speed, float desiredSpeed, float l
     return parameters.maxAcceleration * (1.0f - freeRoadTerm - interactionTerm);
 }
 
-__global__ void updateVehiclesKernel(const Vehicle* inputVehicles, Vehicle* outputVehicles, int vehicleCount,
+__global__ void updateVehiclesKernel(const Vehicle* inputVehicles, Vehicle* outputVehicles,
+                                     const float* edgeLengths, int vehicleCount, int edgeCount,
                                      float deltaTime, float vehicleLength, IDMParameters idmParameters)
 {
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -82,16 +100,17 @@ __global__ void updateVehiclesKernel(const Vehicle* inputVehicles, Vehicle* outp
     const Vehicle vehicle = inputVehicles[index];
 
     float leaderSpeed = vehicle.speed;
-    float gap = 1000000.0f;
+    float leaderDistance = 1.0e30f;
 
-    const int leaderIndex = findLeaderIndex(inputVehicles, vehicleCount, index);
+    const int leaderIndex =
+        findLeaderIndex(inputVehicles, edgeLengths, vehicleCount, edgeCount, index, leaderDistance);
+
+    float gap = 1000000.0f;
 
     if (leaderIndex >= 0)
     {
-        const Vehicle leader = inputVehicles[leaderIndex];
-
-        leaderSpeed = leader.speed;
-        gap = fmaxf(leader.position - vehicle.position - vehicleLength, 0.1f);
+        leaderSpeed = inputVehicles[leaderIndex].speed;
+        gap = fmaxf(leaderDistance - vehicleLength, 0.1f);
     }
 
     const float acceleration =
@@ -124,13 +143,14 @@ CudaVehicleUpdater::~CudaVehicleUpdater()
     if (kernelStopEvent_) cudaEventDestroy(kernelStopEvent_);
 }
 
-bool CudaVehicleUpdater::ensureCapacity(std::size_t count)
+bool CudaVehicleUpdater::ensureCapacity(std::size_t vehicleCount, std::size_t edgeCount)
 {
-    if (count <= capacity_) return true;
+    if (vehicleCount <= vehicleCapacity_ && edgeCount <= edgeCapacity_) return true;
 
     release();
 
-    const std::size_t vehicleBytes = count * sizeof(Vehicle);
+    const std::size_t vehicleBytes = vehicleCount * sizeof(Vehicle);
+    const std::size_t edgeBytes = edgeCount * sizeof(float);
 
     if (!checkCuda(cudaMalloc(reinterpret_cast<void**>(&deviceVehiclesInput_), vehicleBytes),
                    "cudaMalloc input vehicles"))
@@ -143,26 +163,43 @@ bool CudaVehicleUpdater::ensureCapacity(std::size_t count)
         return false;
     }
 
-    capacity_ = count;
+    if (!checkCuda(cudaMalloc(reinterpret_cast<void**>(&deviceEdgeLengths_), edgeBytes),
+                   "cudaMalloc edge lengths"))
+    {
+        release();
+        return false;
+    }
+
+    vehicleCapacity_ = vehicleCount;
+    edgeCapacity_ = edgeCount;
 
     return true;
 }
 
-bool CudaVehicleUpdater::update(std::vector<Vehicle>& vehicles, float deltaTime, float vehicleLength, 
-                                const IDMParameters& idmParameters)
+bool CudaVehicleUpdater::update(std::vector<Vehicle>& vehicles, const std::vector<float>& edgeLengths,
+                                float deltaTime, float vehicleLength, const IDMParameters& idmParameters)
 {
     if (vehicles.empty()) return true;
-    if (!ensureCapacity(vehicles.size())) return false;
+    if (edgeLengths.empty()) return false;
+
+    if (!ensureCapacity(vehicles.size(), edgeLengths.size())) return false;
 
     const std::size_t vehicleBytes = vehicles.size() * sizeof(Vehicle);
+    const std::size_t edgeBytes = edgeLengths.size() * sizeof(float);
 
     if (!checkCuda(cudaMemcpy(deviceVehiclesInput_, vehicles.data(), vehicleBytes, cudaMemcpyHostToDevice),
                    "cudaMemcpy vehicles HostToDevice"))
         return false;
 
+    if (!checkCuda(cudaMemcpy(deviceEdgeLengths_, edgeLengths.data(), edgeBytes, cudaMemcpyHostToDevice),
+                   "cudaMemcpy edge lengths HostToDevice"))
+        return false;
+
     constexpr int threadsPerBlock = 256;
 
     const int vehicleCount = static_cast<int>(vehicles.size());
+    const int edgeCount = static_cast<int>(edgeLengths.size());
+
     const int blockCount = (vehicleCount + threadsPerBlock - 1) / threadsPerBlock;
 
     if (!checkCuda(cudaEventRecord(kernelStartEvent_), "cudaEventRecord start")) return false;
@@ -170,7 +207,9 @@ bool CudaVehicleUpdater::update(std::vector<Vehicle>& vehicles, float deltaTime,
     updateVehiclesKernel<<<blockCount, threadsPerBlock>>>(
         deviceVehiclesInput_,
         deviceVehiclesOutput_,
+        deviceEdgeLengths_,
         vehicleCount,
+        edgeCount,
         deltaTime,
         vehicleLength,
         idmParameters
@@ -201,8 +240,12 @@ void CudaVehicleUpdater::release()
 {
     if (deviceVehiclesInput_) cudaFree(deviceVehiclesInput_);
     if (deviceVehiclesOutput_) cudaFree(deviceVehiclesOutput_);
+    if (deviceEdgeLengths_) cudaFree(deviceEdgeLengths_);
 
     deviceVehiclesInput_ = nullptr;
     deviceVehiclesOutput_ = nullptr;
-    capacity_ = 0;
+    deviceEdgeLengths_ = nullptr;
+
+    vehicleCapacity_ = 0;
+    edgeCapacity_ = 0;
 }

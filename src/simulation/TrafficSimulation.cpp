@@ -22,6 +22,11 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
     : roadNetwork_(calculateNetworkLength(vehicleCount, metersPerVehicle))
 {
     const auto& edges = roadNetwork_.getEdges();
+    edgeLengths_.reserve(edges.size());
+
+    for (const RoadEdge& edge : edges)
+        edgeLengths_.push_back(edge.length);
+    
     const std::size_t edgeCount = edges.size();
 
     vehicles_.reserve(vehicleCount);
@@ -38,6 +43,7 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
 
         vehicle.id = static_cast<int>(i);
         vehicle.currentEdgeId = static_cast<int>(edgeIndex);
+        vehicle.nextEdgeId = roadNetwork_.chooseNextEdge(vehicle.currentEdgeId, vehicle.id);
 
         vehicle.position =
             edges[edgeIndex].length *
@@ -53,14 +59,22 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
     }
 }
 
+void TrafficSimulation::updateRoutingState()
+{
+    for (Vehicle& vehicle : vehicles_)
+        vehicle.nextEdgeId = roadNetwork_.chooseNextEdge(vehicle.currentEdgeId, vehicle.id);
+}
+
 void TrafficSimulation::update(float deltaTime)
 {
     if (vehicles_.empty()) return;
 
+    updateRoutingState();
+
     const auto start = std::chrono::high_resolution_clock::now();
 
     const bool success =
-        cudaVehicleUpdater_.update(vehicles_, deltaTime, vehicleLength_, idm_.getParameters());
+        cudaVehicleUpdater_.update(vehicles_, edgeLengths_, deltaTime, vehicleLength_, idm_.getParameters());
 
     const auto end = std::chrono::high_resolution_clock::now();
 
@@ -97,6 +111,7 @@ void TrafficSimulation::updateRoadTransitions()
             }
 
             vehicle.currentEdgeId = nextEdgeId;
+            vehicle.nextEdgeId = roadNetwork_.chooseNextEdge(vehicle.currentEdgeId, vehicle.id);
         }
     }
 }
@@ -121,6 +136,23 @@ std::size_t TrafficSimulation::findLeaderIndexForTelemetry(std::size_t vehicleIn
         if (distance > 0.0f && distance < closestDistance)
         {
             closestDistance = distance;
+            closestIndex = i;
+        }
+    }
+
+    if (closestIndex != vehicles_.size()) return closestIndex;
+
+    for (std::size_t i = 0; i < vehicles_.size(); ++i)
+    {
+        if (i == vehicleIndex) continue;
+
+        const Vehicle& candidate = vehicles_[i];
+
+        if (candidate.currentEdgeId != vehicle.nextEdgeId) continue;
+
+        if (candidate.position < closestDistance)
+        {
+            closestDistance = candidate.position;
             closestIndex = i;
         }
     }
@@ -159,7 +191,23 @@ VehicleTelemetry TrafficSimulation::getVehicleTelemetry(std::size_t vehicleIndex
     const Vehicle& leader = vehicles_[leaderIndex];
 
     telemetry.leaderId = leader.id;
-    telemetry.gap = std::max(leader.position - vehicle.position - vehicleLength_, 0.1f);
+
+    float centerDistance = 0.0f;
+
+    if (leader.currentEdgeId == vehicle.currentEdgeId)
+    {
+        centerDistance = leader.position - vehicle.position;
+    }
+    else
+    {
+        const RoadEdge& currentEdge = roadNetwork_.getEdges()[vehicle.currentEdgeId];
+
+        centerDistance =
+            (currentEdge.length - vehicle.position)
+            + leader.position;
+    }
+
+    telemetry.gap = std::max(centerDistance - vehicleLength_, 0.1f);
 
     return telemetry;
 }

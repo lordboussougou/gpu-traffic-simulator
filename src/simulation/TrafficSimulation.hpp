@@ -38,9 +38,12 @@ public:
 
 private:
     std::size_t findLeaderIndexForTelemetry(std::size_t vehicleIndex) const;
+    
     void updateRoadTransitions();
+    void updateRoutingState();
 
     std::vector<Vehicle> vehicles_;
+    std::vector<float> edgeLengths_;
 
     IDM idm_;
     CudaVehicleUpdater cudaVehicleUpdater_;

@@ -16,21 +16,24 @@ public:
     CudaVehicleUpdater(const CudaVehicleUpdater&) = delete;
     CudaVehicleUpdater& operator=(const CudaVehicleUpdater&) = delete;
 
-    bool update(std::vector<Vehicle>& vehicles, float deltaTime, float vehicleLength,
-                const IDMParameters& idmParameters);
+    bool update(std::vector<Vehicle>& vehicles, const std::vector<float>& edgeLengths, float deltaTime,
+                float vehicleLength, const IDMParameters& idmParameters);
 
     float getLastKernelTimeMs() const;
 
 private:
-    bool ensureCapacity(std::size_t count);
+    bool ensureCapacity(std::size_t vehicleCount, std::size_t edgeCount);
     void release();
 
     Vehicle* deviceVehiclesInput_ = nullptr;
     Vehicle* deviceVehiclesOutput_ = nullptr;
+    float* deviceEdgeLengths_ = nullptr;
 
     cudaEvent_t kernelStartEvent_ = nullptr;
     cudaEvent_t kernelStopEvent_ = nullptr;
 
-    std::size_t capacity_ = 0;
+    std::size_t vehicleCapacity_ = 0;
+    std::size_t edgeCapacity_ = 0;
+
     float lastKernelTimeMs_ = 0.0f;
 };
