@@ -24,22 +24,24 @@ __device__ float distanceAhead(float vehiclePosition, float leaderPosition, floa
     return distance;
 }
 
-__device__ int findLeaderIndex(const Vehicle* vehicles, int vehicleCount, int vehicleIndex, float roadLength)
+__device__ int findLeaderIndex(const Vehicle* vehicles, int vehicleCount, int vehicleIndex)
 {
-    if (vehicleCount <= 1) return vehicleIndex;
-
     const Vehicle& vehicle = vehicles[vehicleIndex];
 
-    int closestIndex = vehicleIndex;
-    float closestDistance = roadLength;
+    int closestIndex = -1;
+    float closestDistance = 1.0e30f;
 
     for (int i = 0; i < vehicleCount; ++i)
     {
         if (i == vehicleIndex) continue;
 
-        const float distance = distanceAhead(vehicle.position, vehicles[i].position, roadLength);
+        const Vehicle& candidate = vehicles[i];
 
-        if (distance < closestDistance)
+        if (candidate.currentEdgeId != vehicle.currentEdgeId) continue;
+
+        const float distance = candidate.position - vehicle.position;
+
+        if (distance > 0.0f && distance < closestDistance)
         {
             closestDistance = distance;
             closestIndex = i;
@@ -72,8 +74,7 @@ __device__ float computeIdmAcceleration(float speed, float desiredSpeed, float l
 }
 
 __global__ void updateVehiclesKernel(const Vehicle* inputVehicles, Vehicle* outputVehicles, int vehicleCount,
-                                     float deltaTime, float roadLength, float vehicleLength,
-                                     IDMParameters idmParameters)
+                                     float deltaTime, float vehicleLength, IDMParameters idmParameters)
 {
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= vehicleCount) return;
@@ -81,17 +82,16 @@ __global__ void updateVehiclesKernel(const Vehicle* inputVehicles, Vehicle* outp
     const Vehicle vehicle = inputVehicles[index];
 
     float leaderSpeed = vehicle.speed;
-    float gap = roadLength - vehicleLength;
+    float gap = 1000000.0f;
 
-    if (vehicleCount > 1)
+    const int leaderIndex = findLeaderIndex(inputVehicles, vehicleCount, index);
+
+    if (leaderIndex >= 0)
     {
-        const int leaderIndex = findLeaderIndex(inputVehicles, vehicleCount, index, roadLength);
         const Vehicle leader = inputVehicles[leaderIndex];
 
-        const float centerDistance = distanceAhead(vehicle.position, leader.position, roadLength);
-
         leaderSpeed = leader.speed;
-        gap = fmaxf(centerDistance - vehicleLength, 0.1f);
+        gap = fmaxf(leader.position - vehicle.position - vehicleLength, 0.1f);
     }
 
     const float acceleration =
@@ -102,9 +102,6 @@ __global__ void updateVehiclesKernel(const Vehicle* inputVehicles, Vehicle* outp
     updatedVehicle.acceleration = acceleration;
     updatedVehicle.speed = fmaxf(vehicle.speed + acceleration * deltaTime, 0.0f);
     updatedVehicle.position = vehicle.position + updatedVehicle.speed * deltaTime;
-
-    if (updatedVehicle.position >= roadLength)
-        updatedVehicle.position = fmodf(updatedVehicle.position, roadLength);
 
     outputVehicles[index] = updatedVehicle;
 }
@@ -151,8 +148,8 @@ bool CudaVehicleUpdater::ensureCapacity(std::size_t count)
     return true;
 }
 
-bool CudaVehicleUpdater::update(std::vector<Vehicle>& vehicles, float deltaTime, float roadLength,
-                                float vehicleLength, const IDMParameters& idmParameters)
+bool CudaVehicleUpdater::update(std::vector<Vehicle>& vehicles, float deltaTime, float vehicleLength, 
+                                const IDMParameters& idmParameters)
 {
     if (vehicles.empty()) return true;
     if (!ensureCapacity(vehicles.size())) return false;
@@ -175,7 +172,6 @@ bool CudaVehicleUpdater::update(std::vector<Vehicle>& vehicles, float deltaTime,
         deviceVehiclesOutput_,
         vehicleCount,
         deltaTime,
-        roadLength,
         vehicleLength,
         idmParameters
     );

@@ -16,7 +16,7 @@ public:
     CudaVehicleUpdater(const CudaVehicleUpdater&) = delete;
     CudaVehicleUpdater& operator=(const CudaVehicleUpdater&) = delete;
 
-    bool update(std::vector<Vehicle>& vehicles, float deltaTime, float roadLength, float vehicleLength,
+    bool update(std::vector<Vehicle>& vehicles, float deltaTime, float vehicleLength,
                 const IDMParameters& idmParameters);
 
     float getLastKernelTimeMs() const;

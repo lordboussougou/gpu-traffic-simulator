@@ -7,7 +7,7 @@
 
 namespace
 {
-float calculateRoadLength(std::size_t vehicleCount, float metersPerVehicle)
+float calculateNetworkLength(std::size_t vehicleCount, float metersPerVehicle)
 {
     constexpr float vehicleLength = 4.0f;
 
@@ -19,20 +19,31 @@ float calculateRoadLength(std::size_t vehicleCount, float metersPerVehicle)
 }
 
 TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVehicle)
-    : roadNetwork_(calculateRoadLength(vehicleCount, metersPerVehicle))
+    : roadNetwork_(calculateNetworkLength(vehicleCount, metersPerVehicle))
 {
-    const float spacing = std::max(metersPerVehicle, vehicleLength_ + 0.1f);
-
-    roadLength_ = roadNetwork_.getRouteLength();
+    const auto& edges = roadNetwork_.getEdges();
+    const std::size_t edgeCount = edges.size();
 
     vehicles_.reserve(vehicleCount);
 
     for (std::size_t i = 0; i < vehicleCount; ++i)
     {
+        const std::size_t edgeIndex = i % edgeCount;
+        const std::size_t slotIndex = i / edgeCount;
+
+        const std::size_t vehiclesOnEdge =
+            (vehicleCount + edgeCount - 1 - edgeIndex) / edgeCount;
+
         Vehicle vehicle;
 
         vehicle.id = static_cast<int>(i);
-        vehicle.position = static_cast<float>(i) * spacing;
+        vehicle.currentEdgeId = static_cast<int>(edgeIndex);
+
+        vehicle.position =
+            edges[edgeIndex].length *
+            static_cast<float>(slotIndex + 1) /
+            static_cast<float>(vehiclesOnEdge + 1);
+
         vehicle.speed = 0.0f;
         vehicle.acceleration = 0.0f;
         vehicle.lane = 0;
@@ -49,7 +60,7 @@ void TrafficSimulation::update(float deltaTime)
     const auto start = std::chrono::high_resolution_clock::now();
 
     const bool success =
-        cudaVehicleUpdater_.update(vehicles_, deltaTime, roadLength_, vehicleLength_, idm_.getParameters());
+        cudaVehicleUpdater_.update(vehicles_, deltaTime, vehicleLength_, idm_.getParameters());
 
     const auto end = std::chrono::high_resolution_clock::now();
 
@@ -57,22 +68,57 @@ void TrafficSimulation::update(float deltaTime)
         std::chrono::duration<float, std::milli>(end - start).count();
 
     if (!success) throw std::runtime_error("CUDA vehicle update failed.");
+
+    updateRoadTransitions();
+}
+
+void TrafficSimulation::updateRoadTransitions()
+{
+    const auto& edges = roadNetwork_.getEdges();
+
+    for (Vehicle& vehicle : vehicles_)
+    {
+        while (true)
+        {
+            const RoadEdge& currentEdge = edges[vehicle.currentEdgeId];
+
+            if (vehicle.position < currentEdge.length) break;
+
+            vehicle.position -= currentEdge.length;
+
+            const int nextEdgeId = roadNetwork_.chooseNextEdge(vehicle.currentEdgeId, vehicle.id);
+
+            if (nextEdgeId < 0)
+            {
+                vehicle.position = currentEdge.length;
+                vehicle.speed = 0.0f;
+                vehicle.acceleration = 0.0f;
+                break;
+            }
+
+            vehicle.currentEdgeId = nextEdgeId;
+        }
+    }
 }
 
 std::size_t TrafficSimulation::findLeaderIndexForTelemetry(std::size_t vehicleIndex) const
 {
     const Vehicle& vehicle = vehicles_[vehicleIndex];
 
-    std::size_t closestIndex = vehicleIndex;
+    std::size_t closestIndex = vehicles_.size();
     float closestDistance = std::numeric_limits<float>::max();
 
     for (std::size_t i = 0; i < vehicles_.size(); ++i)
     {
         if (i == vehicleIndex) continue;
 
-        const float distance = distanceAhead(vehicle, vehicles_[i]);
+        const Vehicle& candidate = vehicles_[i];
 
-        if (distance < closestDistance)
+        if (candidate.currentEdgeId != vehicle.currentEdgeId) continue;
+
+        const float distance = candidate.position - vehicle.position;
+
+        if (distance > 0.0f && distance < closestDistance)
         {
             closestDistance = distance;
             closestIndex = i;
@@ -82,23 +128,14 @@ std::size_t TrafficSimulation::findLeaderIndexForTelemetry(std::size_t vehicleIn
     return closestIndex;
 }
 
-const RoadNetwork& TrafficSimulation::getRoadNetwork() const
-{
-    return roadNetwork_;
-}
-
-float TrafficSimulation::distanceAhead(const Vehicle& vehicle, const Vehicle& leader) const
-{
-    float distance = leader.position - vehicle.position;
-
-    if (distance <= 0.0f) distance += roadLength_;
-
-    return distance;
-}
-
 const std::vector<Vehicle>& TrafficSimulation::getVehicles() const
 {
     return vehicles_;
+}
+
+const RoadNetwork& TrafficSimulation::getRoadNetwork() const
+{
+    return roadNetwork_;
 }
 
 VehicleTelemetry TrafficSimulation::getVehicleTelemetry(std::size_t vehicleIndex) const
@@ -110,30 +147,26 @@ VehicleTelemetry TrafficSimulation::getVehicleTelemetry(std::size_t vehicleIndex
     const Vehicle& vehicle = vehicles_[vehicleIndex];
 
     telemetry.vehicleId = vehicle.id;
+    telemetry.edgeId = vehicle.currentEdgeId;
     telemetry.speed = vehicle.speed;
     telemetry.desiredSpeed = vehicle.desiredSpeed;
     telemetry.acceleration = vehicle.acceleration;
 
-    if (vehicles_.size() == 1)
-    {
-        telemetry.leaderId = -1;
-        telemetry.gap = roadLength_;
-
-        return telemetry;
-    }
-
     const std::size_t leaderIndex = findLeaderIndexForTelemetry(vehicleIndex);
+
+    if (leaderIndex == vehicles_.size()) return telemetry;
+
     const Vehicle& leader = vehicles_[leaderIndex];
 
     telemetry.leaderId = leader.id;
-    telemetry.gap = std::max(distanceAhead(vehicle, leader) - vehicleLength_, 0.1f);
+    telemetry.gap = std::max(leader.position - vehicle.position - vehicleLength_, 0.1f);
 
     return telemetry;
 }
 
 float TrafficSimulation::getRoadLength() const
 {
-    return roadLength_;
+    return roadNetwork_.getReferenceLoopLength();
 }
 
 float TrafficSimulation::getLastKernelTimeMs() const

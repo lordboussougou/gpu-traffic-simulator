@@ -29,18 +29,26 @@ struct RoadPoint
 class RoadNetwork
 {
 public:
-    explicit RoadNetwork(float routeLength);
+    explicit RoadNetwork(float targetLoopLength);
 
     const std::vector<RoadNode>& getNodes() const;
     const std::vector<RoadEdge>& getEdges() const;
 
-    float getRouteLength() const;
-    RoadPoint getPointOnRoute(float routePosition) const;
+    RoadPoint getPointOnEdge(int edgeIndex, float edgePosition) const;
+    int chooseNextEdge(int currentEdgeIndex, int vehicleId) const;
+
+    float getReferenceLoopLength() const;
+    float getMaxX() const;
+    float getMaxZ() const;
 
 private:
+    void addEdge(int startNodeIndex, int endNodeIndex);
+
     std::vector<RoadNode> nodes_;
     std::vector<RoadEdge> edges_;
-    std::vector<int> routeEdgeIndices_;
+    std::vector<std::vector<int>> outgoingEdgeIndices_;
 
-    float routeLength_ = 0.0f;
+    float referenceLoopLength_ = 0.0f;
+    float maxX_ = 0.0f;
+    float maxZ_ = 0.0f;
 };

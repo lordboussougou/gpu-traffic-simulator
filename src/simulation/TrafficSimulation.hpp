@@ -11,12 +11,13 @@
 struct VehicleTelemetry
 {
     int vehicleId = -1;
+    int edgeId = -1;
     int leaderId = -1;
 
     float speed = 0.0f;
     float desiredSpeed = 0.0f;
     float acceleration = 0.0f;
-    float gap = 0.0f;
+    float gap = -1.0f;
 };
 
 class TrafficSimulation
@@ -37,16 +38,14 @@ public:
 
 private:
     std::size_t findLeaderIndexForTelemetry(std::size_t vehicleIndex) const;
-    float distanceAhead(const Vehicle& vehicle, const Vehicle& leader) const;
+    void updateRoadTransitions();
 
     std::vector<Vehicle> vehicles_;
 
     IDM idm_;
     CudaVehicleUpdater cudaVehicleUpdater_;
-
     RoadNetwork roadNetwork_;
 
-    float roadLength_ = 200.0f;
     float lastCudaUpdateTimeMs_ = 0.0f;
 
     static constexpr float vehicleLength_ = 4.0f;

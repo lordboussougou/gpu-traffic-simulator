@@ -63,10 +63,14 @@ int main(int argc, char* argv[])
     CameraController cameraController;
     TrafficSimulation simulation(vehicleCount, metersPerVehicle);
 
-    const float roadLength = simulation.getRoadLength();
+    const RoadNetwork& initialRoadNetwork = simulation.getRoadNetwork();
 
-    cameraController.setHorizontalBounds(0.0f, roadLength);
-    cameraController.setTarget({std::min(100.0f, roadLength * 0.5f), 0.0f, 0.0f});
+    cameraController.setHorizontalBounds(0.0f, initialRoadNetwork.getMaxX());
+    cameraController.setTarget({
+        initialRoadNetwork.getMaxX() * 0.5f,
+        0.0f,
+        initialRoadNetwork.getMaxZ() * 0.5f
+    });
 
     std::size_t selectedVehicleIndex = 0;
 
@@ -134,7 +138,7 @@ int main(int argc, char* argv[])
         {
             const Vehicle& vehicle = vehicles[i];
 
-            const RoadPoint roadPoint = roadNetwork.getPointOnRoute(vehicle.position);
+            const RoadPoint roadPoint = roadNetwork.getPointOnEdge(vehicle.currentEdgeId, vehicle.position);
 
             const float deltaX = roadPoint.x - cameraTarget.x;
             const float deltaZ = roadPoint.z - cameraTarget.z;
@@ -165,13 +169,30 @@ int main(int argc, char* argv[])
 
         EndMode3D();
 
+        for (const RoadNode& node : nodes)
+        {
+            const Vector2 screenPosition = GetWorldToScreen(
+                {node.x, 2.0f, node.z},
+                cameraController.getCamera()
+            );
+
+            DrawText(
+                TextFormat("%c", 'A' + node.id),
+                static_cast<int>(screenPosition.x),
+                static_cast<int>(screenPosition.y),
+                20,
+                RED
+            );
+        }
+
         const VehicleTelemetry telemetry = simulation.getVehicleTelemetry(selectedVehicleIndex);
 
         DrawText("GPU Traffic Simulator", 20, 20, 28, DARKGRAY);
         DrawText("CUDA leader search + IDM + vehicle update", 20, 58, 20, GRAY);
 
         DrawText(TextFormat("Vehicles: %zu", vehicles.size()), 20, 95, 18, DARKGRAY);
-        DrawText(TextFormat("Visible vehicles: %zu / %zu", renderedVehicleCount, vehicles.size()), 20, 120, 18, DARKGRAY);        DrawText(TextFormat("Road length: %.0f m", roadLength), 20, 145, 18, DARKGRAY);
+        DrawText(TextFormat("Visible vehicles: %zu / %zu", renderedVehicleCount, vehicles.size()), 20, 120, 18, DARKGRAY);        
+        DrawText(TextFormat("Reference loop: %.0f m", simulation.getRoadLength()), 20, 145, 18, DARKGRAY);
         DrawText(TextFormat("Spacing: %.1f m", metersPerVehicle), 20, 170, 18, DARKGRAY);
 
         DrawText(TextFormat("Kernel: %.4f ms", simulation.getLastKernelTimeMs()), 20, 205, 18, DARKGREEN);
@@ -183,14 +204,24 @@ int main(int argc, char* argv[])
 
         DrawFPS(20, 260);
 
-        DrawRectangle(screenWidth - 300, 20, 280, 190, Fade(BLACK, 0.75f));
+        DrawRectangle(screenWidth - 300, 20, 280, 215, Fade(BLACK, 0.75f));
 
         DrawText(TextFormat("Vehicle #%d", telemetry.vehicleId), screenWidth - 280, 35, 22, WHITE);
-        DrawText(TextFormat("Speed: %.2f m/s", telemetry.speed), screenWidth - 280, 70, 18, WHITE);
-        DrawText(TextFormat("Desired: %.2f m/s", telemetry.desiredSpeed), screenWidth - 280, 95, 18, WHITE);
-        DrawText(TextFormat("Acceleration: %.2f m/s2", telemetry.acceleration), screenWidth - 280, 120, 18, WHITE);
-        DrawText(TextFormat("Leader: #%d", telemetry.leaderId), screenWidth - 280, 145, 18, WHITE);
-        DrawText(TextFormat("Gap: %.2f m", telemetry.gap), screenWidth - 280, 170, 18, WHITE);
+        DrawText(TextFormat("Edge: #%d", telemetry.edgeId), screenWidth - 280, 70, 18, WHITE);
+        DrawText(TextFormat("Speed: %.2f m/s", telemetry.speed), screenWidth - 280, 95, 18, WHITE);
+        DrawText(TextFormat("Desired: %.2f m/s", telemetry.desiredSpeed), screenWidth - 280, 120, 18, WHITE);
+        DrawText(TextFormat("Acceleration: %.2f m/s2", telemetry.acceleration), screenWidth - 280, 145, 18, WHITE);
+
+        if (telemetry.leaderId >= 0)
+        {
+            DrawText(TextFormat("Leader: #%d", telemetry.leaderId), screenWidth - 280, 170, 18, WHITE);
+            DrawText(TextFormat("Gap: %.2f m", telemetry.gap), screenWidth - 280, 195, 18, WHITE);
+        }
+        else
+        {
+            DrawText("Leader: none", screenWidth - 280, 170, 18, WHITE);
+            DrawText("Gap: --", screenWidth - 280, 195, 18, WHITE);
+        }
 
         EndDrawing();
     }
