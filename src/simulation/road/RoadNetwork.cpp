@@ -7,74 +7,125 @@
 #include <queue>
 #include <utility>
 
-RoadNetwork::RoadNetwork(float targetLoopLength)
+RoadNetwork::RoadNetwork(const RoadNetworkConfig& config)
+    : config_(config)
 {
-    constexpr float baseLoopLength = 1400.0f;
+    generateGrid();
 
-    const float safeLoopLength = std::max(targetLoopLength, 300.0f);
-    const float scale = safeLoopLength / baseLoopLength;
+    previousEdgeCache_.resize(nodes_.size());
+    shortestPathTreeReady_.resize(nodes_.size(), false);
+}
 
-    nodes_ = {
-        {0,   0.0f * scale, 100.0f * scale}, // A
-        {1, 200.0f * scale, 100.0f * scale}, // B
-        {2, 200.0f * scale,   0.0f * scale}, // C
-        {3, 400.0f * scale,   0.0f * scale}, // D
-        {4, 200.0f * scale, 200.0f * scale}, // E
-        {5, 400.0f * scale, 200.0f * scale}, // F
-        {6, 400.0f * scale, 100.0f * scale}, // G
-        {7, 400.0f * scale, 300.0f * scale}, // H
-        {8,   0.0f * scale, 300.0f * scale}  // I
-    };
+void RoadNetwork::generateGrid()
+{
+    nodes_.clear();
+    roads_.clear();
+    edges_.clear();
+
+    const int rows = std::max(config_.rows, 2);
+    const int columns = std::max(config_.columns, 2);
+
+    nodes_.reserve(static_cast<std::size_t>(rows * columns));
+
+    for (int row = 0; row < rows; ++row)
+    {
+        for (int column = 0; column < columns; ++column)
+        {
+            RoadNode node;
+
+            node.id = row * columns + column;
+            node.x = static_cast<float>(column) * config_.blockLength;
+            node.z = static_cast<float>(row) * config_.blockLength;
+
+            nodes_.push_back(node);
+        }
+    }
 
     outgoingEdgeIndices_.resize(nodes_.size());
 
-    addEdge(0, 1); // 0 : A -> B
-
-    addEdge(1, 2); // 1 : B -> C
-    addEdge(2, 3); // 2 : C -> D
-    addEdge(3, 6); // 3 : D -> G
-
-    addEdge(1, 4); // 4 : B -> E
-    addEdge(4, 5); // 5 : E -> F
-    addEdge(5, 6); // 6 : F -> G
-
-    addEdge(6, 7); // 7 : G -> H
-    addEdge(7, 8); // 8 : H -> I
-    addEdge(8, 0); // 9 : I -> A
-
-    referenceLoopLength_ = safeLoopLength;
-
-    for (const RoadNode& node : nodes_)
+    for (int row = 0; row < rows; ++row)
     {
-        maxX_ = std::max(maxX_, node.x);
-        maxZ_ = std::max(maxZ_, node.z);
+        for (int column = 0; column < columns; ++column)
+        {
+            const int currentNode = row * columns + column;
+
+            if (column + 1 < columns)
+                addBidirectionalRoad(currentNode, currentNode + 1);
+
+            if (row + 1 < rows)
+                addBidirectionalRoad(currentNode, currentNode + columns);
+        }
     }
+
+    maxX_ = static_cast<float>(columns - 1) * config_.blockLength;
+    maxZ_ = static_cast<float>(rows - 1) * config_.blockLength;
 }
 
-void RoadNetwork::addEdge(int startNodeIndex, int endNodeIndex)
+void RoadNetwork::addBidirectionalRoad(int nodeAIndex, int nodeBIndex)
 {
-    const RoadNode& start = nodes_[startNodeIndex];
-    const RoadNode& end = nodes_[endNodeIndex];
+    const RoadNode& nodeA = nodes_[nodeAIndex];
+    const RoadNode& nodeB = nodes_[nodeBIndex];
 
-    const float deltaX = end.x - start.x;
-    const float deltaZ = end.z - start.z;
+    const float deltaX = nodeB.x - nodeA.x;
+    const float deltaZ = nodeB.z - nodeA.z;
     const float length = std::sqrt(deltaX * deltaX + deltaZ * deltaZ);
 
-    const int edgeIndex = static_cast<int>(edges_.size());
+    const int roadId = static_cast<int>(roads_.size());
+    const int forwardEdgeId = static_cast<int>(edges_.size());
+    const int reverseEdgeId = forwardEdgeId + 1;
 
-    edges_.push_back({
-        edgeIndex,
-        startNodeIndex,
-        endNodeIndex,
-        length
-    });
+    Road road;
 
-    outgoingEdgeIndices_[startNodeIndex].push_back(edgeIndex);
+    road.id = roadId;
+    road.nodeAIndex = nodeAIndex;
+    road.nodeBIndex = nodeBIndex;
+    road.forwardEdgeId = forwardEdgeId;
+    road.reverseEdgeId = reverseEdgeId;
+    road.length = length;
+
+    roads_.push_back(road);
+
+    RoadEdge forwardEdge;
+
+    forwardEdge.id = forwardEdgeId;
+    forwardEdge.roadId = roadId;
+    forwardEdge.startNodeIndex = nodeAIndex;
+    forwardEdge.endNodeIndex = nodeBIndex;
+    forwardEdge.length = length;
+    forwardEdge.laneCount = config_.lanesPerDirection;
+
+    edges_.push_back(forwardEdge);
+
+    RoadEdge reverseEdge;
+
+    reverseEdge.id = reverseEdgeId;
+    reverseEdge.roadId = roadId;
+    reverseEdge.startNodeIndex = nodeBIndex;
+    reverseEdge.endNodeIndex = nodeAIndex;
+    reverseEdge.length = length;
+    reverseEdge.laneCount = config_.lanesPerDirection;
+
+    edges_.push_back(reverseEdge);
+
+    outgoingEdgeIndices_[nodeAIndex].push_back(forwardEdgeId);
+    outgoingEdgeIndices_[nodeBIndex].push_back(reverseEdgeId);
+
+    totalRoadLength_ += length;
+}
+
+const RoadNetworkConfig& RoadNetwork::getConfig() const
+{
+    return config_;
 }
 
 const std::vector<RoadNode>& RoadNetwork::getNodes() const
 {
     return nodes_;
+}
+
+const std::vector<Road>& RoadNetwork::getRoads() const
+{
+    return roads_;
 }
 
 const std::vector<RoadEdge>& RoadNetwork::getEdges() const
@@ -87,41 +138,60 @@ RoadPoint RoadNetwork::getPointOnEdge(int edgeIndex, float edgePosition) const
     if (edgeIndex < 0 || edgeIndex >= static_cast<int>(edges_.size())) return {};
 
     const RoadEdge& edge = edges_[edgeIndex];
-    const RoadNode& start = nodes_[edge.startNodeIndex];
-    const RoadNode& end = nodes_[edge.endNodeIndex];
+
+    const RoadNode& startNode = nodes_[edge.startNodeIndex];
+    const RoadNode& endNode = nodes_[edge.endNodeIndex];
 
     const float safePosition = std::clamp(edgePosition, 0.0f, edge.length);
     const float t = edge.length > 0.0f ? safePosition / edge.length : 0.0f;
 
     RoadPoint point;
 
-    point.x = start.x + (end.x - start.x) * t;
-    point.z = start.z + (end.z - start.z) * t;
+    point.x = startNode.x + (endNode.x - startNode.x) * t;
+    point.z = startNode.z + (endNode.z - startNode.z) * t;
 
-    point.directionX = (end.x - start.x) / edge.length;
-    point.directionZ = (end.z - start.z) / edge.length;
+    point.directionX = (endNode.x - startNode.x) / edge.length;
+    point.directionZ = (endNode.z - startNode.z) / edge.length;
 
     return point;
 }
 
-std::vector<int> RoadNetwork::findShortestPath(int startNodeIndex, int destinationNodeIndex) const
+RoadPoint RoadNetwork::getLanePointOnEdge(int edgeIndex, float edgePosition, int lane) const
 {
-    if (startNodeIndex < 0 || startNodeIndex >= static_cast<int>(nodes_.size())) return {};
-    if (destinationNodeIndex < 0 || destinationNodeIndex >= static_cast<int>(nodes_.size())) return {};
-    if (startNodeIndex == destinationNodeIndex) return {};
+    RoadPoint point = getPointOnEdge(edgeIndex, edgePosition);
+
+    if (edgeIndex < 0 || edgeIndex >= static_cast<int>(edges_.size())) return point;
+
+    const RoadEdge& edge = edges_[edgeIndex];
+    const int safeLane = std::clamp(lane, 0, edge.laneCount - 1);
+
+    const float rightX = point.directionZ;
+    const float rightZ = -point.directionX;
+
+    const float laneOffset =
+        (static_cast<float>(safeLane) + 0.5f) * config_.laneWidth;
+
+    point.x += rightX * laneOffset;
+    point.z += rightZ * laneOffset;
+
+    return point;
+}
+
+void RoadNetwork::buildShortestPathTree(int startNodeIndex) const
+{
+    if (startNodeIndex < 0 || startNodeIndex >= static_cast<int>(nodes_.size())) return;
+    if (shortestPathTreeReady_[startNodeIndex]) return;
 
     const float infinity = std::numeric_limits<float>::max();
 
     std::vector<float> distances(nodes_.size(), infinity);
-    std::vector<int> previousEdge(nodes_.size(), -1);
+    std::vector<int>& previousEdge = previousEdgeCache_[startNodeIndex];
+
+    previousEdge.assign(nodes_.size(), -1);
 
     using QueueEntry = std::pair<float, int>;
 
-    std::priority_queue<
-        QueueEntry,
-        std::vector<QueueEntry>,
-        std::greater<QueueEntry>
-    > queue;
+    std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<QueueEntry>> queue;
 
     distances[startNodeIndex] = 0.0f;
     queue.push({0.0f, startNodeIndex});
@@ -132,24 +202,35 @@ std::vector<int> RoadNetwork::findShortestPath(int startNodeIndex, int destinati
         queue.pop();
 
         if (currentDistance > distances[currentNode]) continue;
-        if (currentNode == destinationNodeIndex) break;
 
         for (const int edgeIndex : outgoingEdgeIndices_[currentNode])
         {
             const RoadEdge& edge = edges_[edgeIndex];
-            const int nextNode = edge.endNodeIndex;
 
+            const int nextNode = edge.endNodeIndex;
             const float newDistance = currentDistance + edge.length;
 
-            if (newDistance < distances[nextNode])
-            {
-                distances[nextNode] = newDistance;
-                previousEdge[nextNode] = edgeIndex;
+            if (newDistance >= distances[nextNode]) continue;
 
-                queue.push({newDistance, nextNode});
-            }
+            distances[nextNode] = newDistance;
+            previousEdge[nextNode] = edgeIndex;
+
+            queue.push({newDistance, nextNode});
         }
     }
+
+    shortestPathTreeReady_[startNodeIndex] = true;
+}
+
+std::vector<int> RoadNetwork::findShortestPath(int startNodeIndex, int destinationNodeIndex) const
+{
+    if (startNodeIndex < 0 || startNodeIndex >= static_cast<int>(nodes_.size())) return {};
+    if (destinationNodeIndex < 0 || destinationNodeIndex >= static_cast<int>(nodes_.size())) return {};
+    if (startNodeIndex == destinationNodeIndex) return {};
+
+    buildShortestPathTree(startNodeIndex);
+
+    const std::vector<int>& previousEdge = previousEdgeCache_[startNodeIndex];
 
     if (previousEdge[destinationNodeIndex] < 0) return {};
 
@@ -172,11 +253,6 @@ std::vector<int> RoadNetwork::findShortestPath(int startNodeIndex, int destinati
     return path;
 }
 
-float RoadNetwork::getReferenceLoopLength() const
-{
-    return referenceLoopLength_;
-}
-
 float RoadNetwork::getMaxX() const
 {
     return maxX_;
@@ -185,4 +261,9 @@ float RoadNetwork::getMaxX() const
 float RoadNetwork::getMaxZ() const
 {
     return maxZ_;
+}
+
+float RoadNetwork::getTotalRoadLength() const
+{
+    return totalRoadLength_;
 }

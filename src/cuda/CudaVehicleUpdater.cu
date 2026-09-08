@@ -31,6 +31,7 @@ __device__ int findLeaderIndex(const Vehicle* vehicles, const float* edgeLengths
         const Vehicle& candidate = vehicles[i];
 
         if (candidate.currentEdgeId != vehicle.currentEdgeId) continue;
+        if (candidate.lane != vehicle.lane) continue;
 
         const float distance = candidate.position - vehicle.position;
 
@@ -55,6 +56,7 @@ __device__ int findLeaderIndex(const Vehicle* vehicles, const float* edgeLengths
         const Vehicle& candidate = vehicles[i];
 
         if (candidate.currentEdgeId != vehicle.nextEdgeId) continue;
+        if (candidate.lane != vehicle.lane) continue;
 
         const float distance = distanceToIntersection + candidate.position;
 

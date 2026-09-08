@@ -5,24 +5,17 @@
 #include <limits>
 #include <stdexcept>
 
-namespace
-{
-float calculateNetworkLength(std::size_t vehicleCount, float metersPerVehicle)
-{
-    constexpr float vehicleLength = 4.0f;
-
-    const float spacing = std::max(metersPerVehicle, vehicleLength + 0.1f);
-    const std::size_t safeVehicleCount = std::max<std::size_t>(vehicleCount, 1);
-
-    return static_cast<float>(safeVehicleCount) * spacing;
-}
-}
 
 TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVehicle)
-    : roadNetwork_(calculateNetworkLength(vehicleCount, metersPerVehicle))
+    : roadNetwork_(RoadNetworkPresets::choose(vehicleCount))
 {
     const auto& edges = roadNetwork_.getEdges();
+
     const std::size_t edgeCount = edges.size();
+    const int laneCount = roadNetwork_.getConfig().lanesPerDirection;
+
+    const std::size_t laneEdgeCount =
+        edgeCount * static_cast<std::size_t>(laneCount);
 
     edgeLengths_.reserve(edgeCount);
 
@@ -34,11 +27,17 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
 
     for (std::size_t i = 0; i < vehicleCount; ++i)
     {
-        const std::size_t edgeIndex = i % edgeCount;
-        const std::size_t slotIndex = i / edgeCount;
+        const std::size_t laneEdgeIndex = i % laneEdgeCount;
+        const std::size_t slotIndex = i / laneEdgeCount;
 
-        const std::size_t vehiclesOnEdge =
-            (vehicleCount + edgeCount - 1 - edgeIndex) / edgeCount;
+        const std::size_t edgeIndex =
+            laneEdgeIndex / static_cast<std::size_t>(laneCount);
+
+        const int lane =
+            static_cast<int>(laneEdgeIndex % static_cast<std::size_t>(laneCount));
+
+        const std::size_t vehiclesOnLane =
+            (vehicleCount + laneEdgeCount - 1 - laneEdgeIndex) / laneEdgeCount;
 
         Vehicle vehicle;
 
@@ -46,15 +45,18 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
         vehicle.currentEdgeId = static_cast<int>(edgeIndex);
         vehicle.nextEdgeId = -1;
 
+        vehicle.lane = lane;
+
         vehicle.position =
             edges[edgeIndex].length *
             static_cast<float>(slotIndex + 1) /
-            static_cast<float>(vehiclesOnEdge + 1);
+            static_cast<float>(vehiclesOnLane + 1);
 
         vehicle.speed = 0.0f;
         vehicle.acceleration = 0.0f;
-        vehicle.lane = 0;
-        vehicle.desiredSpeed = (i == vehicleCount / 2) ? 7.0f : 15.0f;
+
+        vehicle.desiredSpeed =
+            (i == vehicleCount / 2) ? 7.0f : 15.0f;
 
         vehicles_.push_back(vehicle);
     }
@@ -232,6 +234,7 @@ std::size_t TrafficSimulation::findLeaderIndexForTelemetry(std::size_t vehicleIn
         const Vehicle& candidate = vehicles_[i];
 
         if (candidate.currentEdgeId != vehicle.currentEdgeId) continue;
+        if (candidate.lane != vehicle.lane) continue;
 
         const float distance = candidate.position - vehicle.position;
 
@@ -251,6 +254,7 @@ std::size_t TrafficSimulation::findLeaderIndexForTelemetry(std::size_t vehicleIn
         const Vehicle& candidate = vehicles_[i];
 
         if (candidate.currentEdgeId != vehicle.nextEdgeId) continue;
+        if (candidate.lane != vehicle.lane) continue;
 
         if (candidate.position < closestDistance)
         {
@@ -320,7 +324,7 @@ VehicleTelemetry TrafficSimulation::getVehicleTelemetry(std::size_t vehicleIndex
 
 float TrafficSimulation::getRoadLength() const
 {
-    return roadNetwork_.getReferenceLoopLength();
+    return roadNetwork_.getTotalRoadLength();
 }
 
 float TrafficSimulation::getLastKernelTimeMs() const
