@@ -12,12 +12,27 @@ struct VehicleTelemetry
 {
     int vehicleId = -1;
     int edgeId = -1;
+    int nextEdgeId = -1;
+    int destinationNodeId = -1;
     int leaderId = -1;
 
     float speed = 0.0f;
     float desiredSpeed = 0.0f;
     float acceleration = 0.0f;
     float gap = -1.0f;
+};
+
+struct VehicleRoute
+{
+    int destinationNodeIndex = -1;
+
+    std::vector<int> edgePath;
+    std::size_t currentEdgePathIndex = 0;
+
+    int pendingDestinationNodeIndex = -1;
+    std::vector<int> pendingEdgePath;
+
+    int completedTrips = 0;
 };
 
 class TrafficSimulation
@@ -38,11 +53,17 @@ public:
 
 private:
     std::size_t findLeaderIndexForTelemetry(std::size_t vehicleIndex) const;
-    
-    void updateRoadTransitions();
+
+    int chooseDestinationNode(int vehicleId, int startNodeIndex, int tripNumber) const;
+
+    void initializeRoute(std::size_t vehicleIndex);
+    void preparePendingRoute(std::size_t vehicleIndex);
+
     void updateRoutingState();
+    void updateRoadTransitions();
 
     std::vector<Vehicle> vehicles_;
+    std::vector<VehicleRoute> vehicleRoutes_;
     std::vector<float> edgeLengths_;
 
     IDM idm_;

@@ -35,7 +35,8 @@ public:
     const std::vector<RoadEdge>& getEdges() const;
 
     RoadPoint getPointOnEdge(int edgeIndex, float edgePosition) const;
-    int chooseNextEdge(int currentEdgeIndex, int vehicleId) const;
+
+    std::vector<int> findShortestPath(int startNodeIndex, int destinationNodeIndex) const;
 
     float getReferenceLoopLength() const;
     float getMaxX() const;

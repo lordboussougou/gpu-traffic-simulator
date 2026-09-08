@@ -169,6 +169,47 @@ int main(int argc, char* argv[])
 
         EndMode3D();
 
+        for (const RoadEdge& edge : edges)
+        {
+            const RoadNode& startNode = nodes[edge.startNodeIndex];
+            const RoadNode& endNode = nodes[edge.endNodeIndex];
+
+            const Vector3 labelWorldPosition{
+                (startNode.x + endNode.x) * 0.5f,
+                4.0f,
+                (startNode.z + endNode.z) * 0.5f
+            };
+
+            const Vector2 screenPosition =
+                GetWorldToScreen(labelWorldPosition, cameraController.getCamera());
+
+            const char* label = TextFormat(
+                "E%d %c->%c",
+                edge.id,
+                'A' + startNode.id,
+                'A' + endNode.id
+            );
+
+            const int fontSize = 18;
+            const int textWidth = MeasureText(label, fontSize);
+
+            DrawRectangle(
+                static_cast<int>(screenPosition.x) - 4,
+                static_cast<int>(screenPosition.y) - 2,
+                textWidth + 8,
+                fontSize + 4,
+                Fade(WHITE, 0.85f)
+            );
+
+            DrawText(
+                label,
+                static_cast<int>(screenPosition.x),
+                static_cast<int>(screenPosition.y),
+                fontSize,
+                DARKBLUE
+            );
+        }
+
         for (const RoadNode& node : nodes)
         {
             const Vector2 screenPosition = GetWorldToScreen(
@@ -204,23 +245,24 @@ int main(int argc, char* argv[])
 
         DrawFPS(20, 260);
 
-        DrawRectangle(screenWidth - 300, 20, 280, 215, Fade(BLACK, 0.75f));
+        DrawRectangle(screenWidth - 300, 20, 280, 240, Fade(BLACK, 0.75f));
 
         DrawText(TextFormat("Vehicle #%d", telemetry.vehicleId), screenWidth - 280, 35, 22, WHITE);
-        DrawText(TextFormat("Edge: #%d", telemetry.edgeId), screenWidth - 280, 70, 18, WHITE);
-        DrawText(TextFormat("Speed: %.2f m/s", telemetry.speed), screenWidth - 280, 95, 18, WHITE);
-        DrawText(TextFormat("Desired: %.2f m/s", telemetry.desiredSpeed), screenWidth - 280, 120, 18, WHITE);
-        DrawText(TextFormat("Acceleration: %.2f m/s2", telemetry.acceleration), screenWidth - 280, 145, 18, WHITE);
+        DrawText(TextFormat("Edge: #%d -> #%d", telemetry.edgeId, telemetry.nextEdgeId), screenWidth - 280, 70, 18, WHITE);
+        DrawText(TextFormat("Destination: %c", 'A' + telemetry.destinationNodeId), screenWidth - 280, 95, 18, WHITE);
+        DrawText(TextFormat("Speed: %.2f m/s", telemetry.speed), screenWidth - 280, 120, 18, WHITE);
+        DrawText(TextFormat("Desired: %.2f m/s", telemetry.desiredSpeed), screenWidth - 280, 145, 18, WHITE);
+        DrawText(TextFormat("Acceleration: %.2f m/s2", telemetry.acceleration), screenWidth - 280, 170, 18, WHITE);
 
         if (telemetry.leaderId >= 0)
         {
-            DrawText(TextFormat("Leader: #%d", telemetry.leaderId), screenWidth - 280, 170, 18, WHITE);
-            DrawText(TextFormat("Gap: %.2f m", telemetry.gap), screenWidth - 280, 195, 18, WHITE);
+            DrawText(TextFormat("Leader: #%d", telemetry.leaderId), screenWidth - 280, 195, 18, WHITE);
+            DrawText(TextFormat("Gap: %.2f m", telemetry.gap), screenWidth - 280, 220, 18, WHITE);
         }
         else
         {
-            DrawText("Leader: none", screenWidth - 280, 170, 18, WHITE);
-            DrawText("Gap: --", screenWidth - 280, 195, 18, WHITE);
+            DrawText("Leader: none", screenWidth - 280, 195, 18, WHITE);
+            DrawText("Gap: --", screenWidth - 280, 220, 18, WHITE);
         }
 
         EndDrawing();

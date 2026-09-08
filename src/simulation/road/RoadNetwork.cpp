@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <limits>
+#include <queue>
+#include <utility>
 
 RoadNetwork::RoadNetwork(float targetLoopLength)
 {
@@ -100,19 +104,72 @@ RoadPoint RoadNetwork::getPointOnEdge(int edgeIndex, float edgePosition) const
     return point;
 }
 
-int RoadNetwork::chooseNextEdge(int currentEdgeIndex, int vehicleId) const
+std::vector<int> RoadNetwork::findShortestPath(int startNodeIndex, int destinationNodeIndex) const
 {
-    if (currentEdgeIndex < 0 || currentEdgeIndex >= static_cast<int>(edges_.size())) return -1;
+    if (startNodeIndex < 0 || startNodeIndex >= static_cast<int>(nodes_.size())) return {};
+    if (destinationNodeIndex < 0 || destinationNodeIndex >= static_cast<int>(nodes_.size())) return {};
+    if (startNodeIndex == destinationNodeIndex) return {};
 
-    const RoadEdge& currentEdge = edges_[currentEdgeIndex];
-    const auto& outgoingEdges = outgoingEdgeIndices_[currentEdge.endNodeIndex];
+    const float infinity = std::numeric_limits<float>::max();
 
-    if (outgoingEdges.empty()) return -1;
-    if (outgoingEdges.size() == 1) return outgoingEdges[0];
+    std::vector<float> distances(nodes_.size(), infinity);
+    std::vector<int> previousEdge(nodes_.size(), -1);
 
-    const std::size_t choice = static_cast<std::size_t>(vehicleId) % outgoingEdges.size();
+    using QueueEntry = std::pair<float, int>;
 
-    return outgoingEdges[choice];
+    std::priority_queue<
+        QueueEntry,
+        std::vector<QueueEntry>,
+        std::greater<QueueEntry>
+    > queue;
+
+    distances[startNodeIndex] = 0.0f;
+    queue.push({0.0f, startNodeIndex});
+
+    while (!queue.empty())
+    {
+        const auto [currentDistance, currentNode] = queue.top();
+        queue.pop();
+
+        if (currentDistance > distances[currentNode]) continue;
+        if (currentNode == destinationNodeIndex) break;
+
+        for (const int edgeIndex : outgoingEdgeIndices_[currentNode])
+        {
+            const RoadEdge& edge = edges_[edgeIndex];
+            const int nextNode = edge.endNodeIndex;
+
+            const float newDistance = currentDistance + edge.length;
+
+            if (newDistance < distances[nextNode])
+            {
+                distances[nextNode] = newDistance;
+                previousEdge[nextNode] = edgeIndex;
+
+                queue.push({newDistance, nextNode});
+            }
+        }
+    }
+
+    if (previousEdge[destinationNodeIndex] < 0) return {};
+
+    std::vector<int> path;
+
+    int currentNode = destinationNodeIndex;
+
+    while (currentNode != startNodeIndex)
+    {
+        const int edgeIndex = previousEdge[currentNode];
+
+        if (edgeIndex < 0) return {};
+
+        path.push_back(edgeIndex);
+        currentNode = edges_[edgeIndex].startNodeIndex;
+    }
+
+    std::reverse(path.begin(), path.end());
+
+    return path;
 }
 
 float RoadNetwork::getReferenceLoopLength() const

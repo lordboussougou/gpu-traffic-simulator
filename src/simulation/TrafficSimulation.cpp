@@ -22,14 +22,15 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
     : roadNetwork_(calculateNetworkLength(vehicleCount, metersPerVehicle))
 {
     const auto& edges = roadNetwork_.getEdges();
-    edgeLengths_.reserve(edges.size());
+    const std::size_t edgeCount = edges.size();
+
+    edgeLengths_.reserve(edgeCount);
 
     for (const RoadEdge& edge : edges)
         edgeLengths_.push_back(edge.length);
-    
-    const std::size_t edgeCount = edges.size();
 
     vehicles_.reserve(vehicleCount);
+    vehicleRoutes_.resize(vehicleCount);
 
     for (std::size_t i = 0; i < vehicleCount; ++i)
     {
@@ -43,7 +44,7 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
 
         vehicle.id = static_cast<int>(i);
         vehicle.currentEdgeId = static_cast<int>(edgeIndex);
-        vehicle.nextEdgeId = roadNetwork_.chooseNextEdge(vehicle.currentEdgeId, vehicle.id);
+        vehicle.nextEdgeId = -1;
 
         vehicle.position =
             edges[edgeIndex].length *
@@ -57,12 +58,91 @@ TrafficSimulation::TrafficSimulation(std::size_t vehicleCount, float metersPerVe
 
         vehicles_.push_back(vehicle);
     }
+
+    for (std::size_t i = 0; i < vehicles_.size(); ++i)
+        initializeRoute(i);
+
+    updateRoutingState();
+}
+
+int TrafficSimulation::chooseDestinationNode(int vehicleId, int startNodeIndex, int tripNumber) const
+{
+    const int nodeCount = static_cast<int>(roadNetwork_.getNodes().size());
+
+    if (nodeCount <= 1) return startNodeIndex;
+
+    int destination =
+        (vehicleId * 3 + tripNumber * 5 + 2) % nodeCount;
+
+    if (destination == startNodeIndex)
+        destination = (destination + 1) % nodeCount;
+
+    return destination;
+}
+
+void TrafficSimulation::initializeRoute(std::size_t vehicleIndex)
+{
+    Vehicle& vehicle = vehicles_[vehicleIndex];
+    VehicleRoute& route = vehicleRoutes_[vehicleIndex];
+
+    const auto& edges = roadNetwork_.getEdges();
+    const RoadEdge& currentEdge = edges[vehicle.currentEdgeId];
+
+    const int startNodeIndex = currentEdge.endNodeIndex;
+    const int destinationNodeIndex =
+        chooseDestinationNode(vehicle.id, startNodeIndex, route.completedTrips);
+
+    route.destinationNodeIndex = destinationNodeIndex;
+    route.currentEdgePathIndex = 0;
+
+    route.edgePath.clear();
+    route.edgePath.push_back(vehicle.currentEdgeId);
+
+    const std::vector<int> continuation =
+        roadNetwork_.findShortestPath(startNodeIndex, destinationNodeIndex);
+
+    route.edgePath.insert(route.edgePath.end(), continuation.begin(), continuation.end());
+
+    preparePendingRoute(vehicleIndex);
+}
+
+void TrafficSimulation::preparePendingRoute(std::size_t vehicleIndex)
+{
+    Vehicle& vehicle = vehicles_[vehicleIndex];
+    VehicleRoute& route = vehicleRoutes_[vehicleIndex];
+
+    if (!route.pendingEdgePath.empty()) return;
+    if (route.destinationNodeIndex < 0) return;
+
+    const int nextTripNumber = route.completedTrips + 1;
+
+    route.pendingDestinationNodeIndex =
+        chooseDestinationNode(vehicle.id, route.destinationNodeIndex, nextTripNumber);
+
+    route.pendingEdgePath =
+        roadNetwork_.findShortestPath(route.destinationNodeIndex, route.pendingDestinationNodeIndex);
 }
 
 void TrafficSimulation::updateRoutingState()
 {
-    for (Vehicle& vehicle : vehicles_)
-        vehicle.nextEdgeId = roadNetwork_.chooseNextEdge(vehicle.currentEdgeId, vehicle.id);
+    for (std::size_t i = 0; i < vehicles_.size(); ++i)
+    {
+        Vehicle& vehicle = vehicles_[i];
+        VehicleRoute& route = vehicleRoutes_[i];
+
+        if (route.currentEdgePathIndex + 1 < route.edgePath.size())
+        {
+            vehicle.nextEdgeId = route.edgePath[route.currentEdgePathIndex + 1];
+            continue;
+        }
+
+        preparePendingRoute(i);
+
+        if (!route.pendingEdgePath.empty())
+            vehicle.nextEdgeId = route.pendingEdgePath.front();
+        else
+            vehicle.nextEdgeId = -1;
+    }
 }
 
 void TrafficSimulation::update(float deltaTime)
@@ -84,14 +164,18 @@ void TrafficSimulation::update(float deltaTime)
     if (!success) throw std::runtime_error("CUDA vehicle update failed.");
 
     updateRoadTransitions();
+    updateRoutingState();
 }
 
 void TrafficSimulation::updateRoadTransitions()
 {
     const auto& edges = roadNetwork_.getEdges();
 
-    for (Vehicle& vehicle : vehicles_)
+    for (std::size_t i = 0; i < vehicles_.size(); ++i)
     {
+        Vehicle& vehicle = vehicles_[i];
+        VehicleRoute& route = vehicleRoutes_[i];
+
         while (true)
         {
             const RoadEdge& currentEdge = edges[vehicle.currentEdgeId];
@@ -100,18 +184,36 @@ void TrafficSimulation::updateRoadTransitions()
 
             vehicle.position -= currentEdge.length;
 
-            const int nextEdgeId = roadNetwork_.chooseNextEdge(vehicle.currentEdgeId, vehicle.id);
-
-            if (nextEdgeId < 0)
+            if (route.currentEdgePathIndex + 1 < route.edgePath.size())
             {
-                vehicle.position = currentEdge.length;
+                ++route.currentEdgePathIndex;
+                vehicle.currentEdgeId = route.edgePath[route.currentEdgePathIndex];
+                continue;
+            }
+
+            ++route.completedTrips;
+
+            if (route.pendingEdgePath.empty())
+                preparePendingRoute(i);
+
+            if (route.pendingEdgePath.empty())
+            {
+                vehicle.position = 0.0f;
                 vehicle.speed = 0.0f;
                 vehicle.acceleration = 0.0f;
                 break;
             }
 
-            vehicle.currentEdgeId = nextEdgeId;
-            vehicle.nextEdgeId = roadNetwork_.chooseNextEdge(vehicle.currentEdgeId, vehicle.id);
+            route.edgePath = std::move(route.pendingEdgePath);
+            route.destinationNodeIndex = route.pendingDestinationNodeIndex;
+
+            route.pendingEdgePath.clear();
+            route.pendingDestinationNodeIndex = -1;
+            route.currentEdgePathIndex = 0;
+
+            vehicle.currentEdgeId = route.edgePath.front();
+
+            preparePendingRoute(i);
         }
     }
 }
@@ -177,9 +279,13 @@ VehicleTelemetry TrafficSimulation::getVehicleTelemetry(std::size_t vehicleIndex
     if (vehicleIndex >= vehicles_.size()) return telemetry;
 
     const Vehicle& vehicle = vehicles_[vehicleIndex];
+    const VehicleRoute& route = vehicleRoutes_[vehicleIndex];
 
     telemetry.vehicleId = vehicle.id;
     telemetry.edgeId = vehicle.currentEdgeId;
+    telemetry.nextEdgeId = vehicle.nextEdgeId;
+    telemetry.destinationNodeId = route.destinationNodeIndex;
+
     telemetry.speed = vehicle.speed;
     telemetry.desiredSpeed = vehicle.desiredSpeed;
     telemetry.acceleration = vehicle.acceleration;
